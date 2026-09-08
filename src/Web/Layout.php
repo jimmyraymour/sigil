@@ -55,6 +55,7 @@ final class Layout
 <main>
 ' . $page['body'] . '
 </main>
+<script src="https://bifrost.raymour.local/shared/bar.js" data-current="sigil" defer></script>
 </body>
 </html>';
     }
