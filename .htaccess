@@ -1,0 +1,57 @@
+# Sigil — project-root guard.
+#
+# The application's document root is public/. Everything above it (.env, the
+# Meridian guide and its live key, src/, config/, storage/, database/, the
+# specs) must never be reachable over HTTP. Under XAMPP the project sits at
+# http://localhost/sigil/, so without this file Apache happily served a
+# directory listing of the whole repository.
+
+# No directory listings anywhere in this project.
+Options -Indexes
+
+# Apache does not hand the Authorization header to PHP unless told to, which
+# made every authenticated API call 401 even with a valid key. Both forms are
+# here because which one works depends on how PHP is wired (module vs CGI).
+<IfModule mod_setenvif.c>
+    SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+</IfModule>
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    # No RewriteBase: every substitution below is relative, so this file works
+    # whatever the folder is called and wherever it is mounted.
+
+    RewriteCond %{HTTP:Authorization} .
+    RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+    # Never expose dotfiles (.env, .git, .gitignore, ...).
+    RewriteRule (^|/)\. - [F,L]
+
+    # Never expose source, config, secrets or working data.
+    RewriteRule ^(src|config|database|storage|tests|bin|vendor)(/|$) - [F,L]
+    RewriteRule \.(md|sql|log|lock|json|dist|example|ya?ml)$ - [F,L]
+    RewriteRule ^bootstrap\.php$ - [F,L]
+
+    # Static assets served straight from public/.
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^assets/(.*)$ public/assets/$1 [L]
+
+    # The signed asset endpoint.
+    RewriteRule ^render\.php$ public/render.php [QSA,L]
+
+    # REST API.
+    RewriteRule ^api/v1(/.*)?$ public/api.php [QSA,L]
+
+    # Everything else is a page: hand it to the front controller.
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^(.*)$ public/index.php [QSA,L]
+    RewriteRule ^$ public/index.php [QSA,L]
+</IfModule>
+
+# Belt and braces: even if mod_rewrite is off, deny the secrets outright.
+<FilesMatch "^\.env">
+    Require all denied
+</FilesMatch>
+<FilesMatch "\.(md|sql|log)$">
+    Require all denied
+</FilesMatch>

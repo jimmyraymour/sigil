@@ -1,0 +1,28 @@
+# Secrets
+.env
+
+# Local backups (DB dumps / tarballs) must never be committed
+/backup_data/
+
+# Dependencies (none expected, but keep vendor out just in case)
+/vendor/
+
+# Storage
+storage/logs/*
+storage/renders/*
+storage/tmp/*
+!storage/logs/.gitkeep
+!storage/renders/.gitkeep
+!storage/tmp/.gitkeep
+
+# Local workspace docs that must never be committed
+# (meridian guide contains a live API key; git doc contains an SSH key fingerprint)
+meridian-guide-sigil-20260816.md
+MERIDIAN_GUIDE.md
+sigil_git.md
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/

@@ -1,0 +1,15 @@
+# Sigil — Apache routing (optional; nginx config is in README.md)
+# The built-in PHP dev server ignores this file.
+
+RewriteEngine On
+
+# API
+RewriteRule ^api/v1(/.*)?$ api.php [QSA,L]
+
+# Asset serving
+RewriteRule ^render\.php$ render.php [QSA,L]
+
+# Web pages
+RewriteRule ^$ index.php [QSA,L]
+RewriteRule ^library$ index.php [QSA,L]
+RewriteRule ^settings$ index.php [QSA,L]
