@@ -51,7 +51,10 @@ final class BasePath
         }
 
         $script = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
-        $scriptDir = rtrim(dirname($script), '/');
+        // dirname() emits a backslash on Windows PHP when the script sits at
+        // the root (dirname('/index.php') === '\\') — normalize its OUTPUT
+        // too, or vhost mode detects a bogus '\/' base path.
+        $scriptDir = rtrim(str_replace('\\', '/', dirname($script)), '/');
         if ($scriptDir === '.' || $scriptDir === '/') {
             $scriptDir = '';
         }

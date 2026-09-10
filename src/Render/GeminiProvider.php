@@ -28,8 +28,9 @@ final class GeminiProvider implements RenderProviderInterface
 
     public function render(string $prompt, string $format, ?int $seed): array
     {
+        // Phase 5: central key with the local env var as the fallback.
         $keyEnv = (string) ($this->cfg['key_env'] ?? 'GEMINI_API_KEY');
-        $key = (string) Env::get($keyEnv, '');
+        $key = ProviderRegistry::centralKey($keyEnv);
         if ($key === '') {
             throw new \RuntimeException($keyEnv . ' is not set — add your Google AI Studio key to .env');
         }

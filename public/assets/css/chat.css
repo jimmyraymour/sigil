@@ -31,8 +31,8 @@
   padding: 2px 7px;
   border-radius: 999px;
 }
-.tag.free { background: rgba(52, 211, 153, 0.16); color: var(--accent); }
-.tag.premium { background: rgba(251, 191, 36, 0.16); color: var(--warn); }
+.tag.free { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.tag.premium { background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--warn); }
 
 .small { font-size: 0.85rem; }
 .hint { color: var(--muted); font-weight: 400; font-size: 0.78rem; }
@@ -89,7 +89,7 @@
   white-space: pre-wrap;
 }
 .chat-msg.user { align-self: flex-end; background: var(--bg-3); }
-.chat-msg.assistant { align-self: flex-start; background: rgba(52, 211, 153, 0.12); border: 1px solid var(--border); }
+.chat-msg.assistant { align-self: flex-start; background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid var(--border); }
 
 /* ---- Model picker ---- */
 .model-picker {
@@ -112,7 +112,7 @@
 .model-card:hover { border-color: var(--accent-2); }
 .model-card:has(input:checked) {
   border-color: var(--accent);
-  background: rgba(52, 211, 153, 0.08);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .model-card.unavailable { opacity: 0.55; cursor: not-allowed; }
 .model-card.unavailable:hover { border-color: var(--border); }

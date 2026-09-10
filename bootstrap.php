@@ -24,6 +24,14 @@ spl_autoload_register(static function (string $class): void {
 
 Env::load(SIGIL_ROOT . '/.env');
 
+// Shared portfolio theme (Metronic look) — lives once at the workspace root.
+// Optional on purpose: pages fall back to the app's own CSS if it is missing.
+$raymourTheme = dirname(SIGIL_ROOT) . '/shared/inc/theme.php';
+if (is_file($raymourTheme)) {
+    require_once $raymourTheme;
+}
+unset($raymourTheme);
+
 date_default_timezone_set(Env::get('APP_TIMEZONE', 'America/Santo_Domingo'));
 
 $config = require SIGIL_CONFIG . '/app.php';

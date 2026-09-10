@@ -78,7 +78,9 @@ final class LlmClient
 
     private function openRouter(string $system, string $user, ?string $imagePath): array
     {
-        $key = (string) ($this->cfg['openrouter_api_key'] ?? '');
+        // Phase 5: central key, local config value as the migration fallback.
+        $key = \Sigil\Render\ProviderRegistry::centralKey('OPENROUTER_API_KEY')
+            ?: (string) ($this->cfg['openrouter_api_key'] ?? '');
         if ($key === '') {
             throw new \RuntimeException('OpenRouter is not configured (OPENROUTER_API_KEY is empty)');
         }

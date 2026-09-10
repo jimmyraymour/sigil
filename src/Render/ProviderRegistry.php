@@ -31,13 +31,44 @@ final class ProviderRegistry
         return $this->providers[$name];
     }
 
+
+/** env var -> central Bifrost credential slot (Phase 5). */
+const CENTRAL_SLOTS = [
+    'OPENROUTER_API_KEY' => 'openrouter',
+    'GEMINI_API_KEY'     => 'gemini',
+    'GOOGLE_API_KEY'     => 'gemini',
+    'RECRAFT_API_KEY'    => 'recraft',
+    'IDEOGRAM_API_KEY'   => 'ideogram',
+];
+
+/**
+ * A provider key: Bifrost first, the local env var as the migration fallback.
+ * Memoized per request by the client, so repeat calls cost nothing.
+ */
+public static function centralKey(string $keyEnv): string
+{
+    if ($keyEnv === '') {
+        return '';
+    }
+    $local = (string) Env::get($keyEnv, '');
+    $slot = self::CENTRAL_SLOTS[$keyEnv] ?? null;
+    if ($slot === null || !class_exists('Bifrost', false)) {
+        return $local;
+    }
+    try {
+        return \Bifrost::secret($slot, $keyEnv);
+    } catch (\Throwable) {
+        return $local;
+    }
+}
+
     public function isAvailable(string $name): bool
     {
         if (!$this->has($name)) {
             return false;
         }
         $keyEnv = (string) ($this->providers[$name]['key_env'] ?? '');
-        return $keyEnv === '' || Env::get($keyEnv, '') !== '';
+        return $keyEnv === '' || self::centralKey($keyEnv) !== '';
     }
 
     public function names(): array
