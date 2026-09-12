@@ -3,18 +3,34 @@ declare(strict_types=1);
 
 namespace Sigil\Brief;
 
-use Sigil\Util\HttpClient;
 use Sigil\Util\Logger;
 
 /**
- * Local-first LLM client. Ollama is primary (free, local); OpenRouter is
- * the fallback. Iteration can pass the previous render image to vision
- * models; if the model rejects the image the call retries text-only.
+ * Bifrost is the only thing that talks to AI providers (root CLAUDE.md;
+ * docs/superpowers/specs/2026-09-10-bifrost-ai-routes-design.md). The
+ * fallback order (Local Ollama 01 -> the shared portfolio OpenRouter key)
+ * lives in Bifrost's `brief` job, not here; this class only shapes sigil's
+ * system/user/image input into one Bifrost::ai() call and back into the
+ * {text, model, backend} shape BriefRefiner already expects.
+ *
+ * Vision (iterate() looking at the previous render) is a SEPARATE job,
+ * `brief.vision`, rather than a per-call model pin on `brief`: AiRunner's
+ * pin (options.route+model) bypasses a job's configured fallback steps
+ * entirely, so pinning per-call would have cost the text job its real
+ * Ollama -> OpenRouter fallback on every plain call too. brief.vision has
+ * only one step (the local vision model) and no fallback of its own — no
+ * free OpenRouter model available to this project is actually vision-
+ * capable, so there is nothing honest to fall back to. A previous version
+ * of this class retried the local model text-only when it specifically
+ * rejected an attached image before falling through to OpenRouter; that
+ * three-tier degradation has no equivalent in Bifrost's flat step list and
+ * is not reproduced — accepted trade-off, not an oversight.
  */
 final class LlmClient
 {
     public function __construct(private array $cfg, private Logger $logger)
     {
+        require_once dirname(__DIR__, 3) . '/bifrost/shared/php/BifrostClient.php';
     }
 
     /**
@@ -22,94 +38,39 @@ final class LlmClient
      */
     public function complete(string $system, string $user, ?string $imagePath = null): array
     {
-        try {
-            return $this->ollama($system, $user, $imagePath);
-        } catch (\Throwable $e) {
-            $this->logger->warn('llm', 'Ollama failed, retrying without image', ['error' => $e->getMessage()]);
-            if ($imagePath !== null) {
-                try {
-                    return $this->ollama($system, $user, null);
-                } catch (\Throwable $e2) {
-                    $this->logger->warn('llm', 'Ollama failed without image, falling back to OpenRouter', ['error' => $e2->getMessage()]);
-                }
-            }
-            try {
-                return $this->openRouter($system, $user, $imagePath);
-            } catch (\Throwable $fallbackError) {
-                // Keep the failure typed so the API can return its documented
-                // upstream_error shape instead of leaking a 500/stack trace.
-                throw new BriefRefinementFailed(
-                    'Both LLM backends failed: ' . $fallbackError->getMessage(),
-                    0,
-                    $fallbackError
-                );
-            }
-        }
-    }
-
-    private function ollama(string $system, string $user, ?string $imagePath): array
-    {
-        $url = rtrim((string) $this->cfg['ollama_url'], '/') . '/api/generate';
-        // Only swap in the vision model when there is actually an image to
-        // look at — it is smaller and writes weaker prose than the text model.
-        $model = ($imagePath !== null && is_file($imagePath))
-            ? (string) ($this->cfg['ollama_vision_model'] ?? $this->cfg['ollama_model'])
-            : (string) $this->cfg['ollama_model'];
-        $body = [
-            'model' => $model,
-            'prompt' => $system . "\n\n" . $user,
-            'stream' => false,
-            'options' => ['temperature' => $this->cfg['temperature'] ?? 0.7],
+        $input = ['system' => $system, 'prompt' => $user];
+        $options = [
+            'temperature' => (float) ($this->cfg['temperature'] ?? 0.7),
+            // A reasoning-capable free OpenRouter model otherwise spends the whole max_tokens
+            // budget on hidden thinking before writing a word of the actual concept (the exact
+            // failure meridian's strategist job hit — see BifrostClient.php's Bifrost::ai()
+            // caller in meridian/scripts/mc_strategist.php). Ignored by every other engine.
+            'extra' => ['reasoning' => ['effort' => 'none', 'exclude' => true]],
         ];
-        if ($imagePath !== null && is_file($imagePath)) {
-            $body['images'] = [base64_encode((string) file_get_contents($imagePath))];
-        }
-        $res = HttpClient::postJson($url, $body, [], (int) ($this->cfg['ollama_timeout'] ?? 120));
-        if ($res['status'] !== 200) {
-            throw new \RuntimeException('Ollama HTTP ' . $res['status'] . ': ' . substr($res['body'], 0, 300));
-        }
-        $data = json_decode($res['body'], true);
-        $text = trim((string) ($data['response'] ?? ''));
-        if ($text === '') {
-            throw new \RuntimeException('Ollama returned an empty response');
-        }
-        return ['text' => $text, 'model' => 'ollama:' . $model, 'backend' => 'ollama'];
-    }
+        $job = 'brief';
 
-    private function openRouter(string $system, string $user, ?string $imagePath): array
-    {
-        // Phase 5: central key, local config value as the migration fallback.
-        $key = \Sigil\Render\ProviderRegistry::centralKey('OPENROUTER_API_KEY')
-            ?: (string) ($this->cfg['openrouter_api_key'] ?? '');
-        if ($key === '') {
-            throw new \RuntimeException('OpenRouter is not configured (OPENROUTER_API_KEY is empty)');
-        }
-        $url = 'https://openrouter.ai/api/v1/chat/completions';
-        $userContent = $user;
-        if ($imagePath !== null && is_file($imagePath)) {
+        $hasImage = $imagePath !== null && is_file($imagePath);
+        if ($hasImage) {
             $mime = (string) (mime_content_type($imagePath) ?: 'image/png');
-            $userContent = [
-                ['type' => 'text', 'text' => $user],
-                ['type' => 'image_url', 'image_url' => ['url' => 'data:' . $mime . ';base64,' . base64_encode((string) file_get_contents($imagePath))]],
-            ];
+            $input['images'] = [['mime' => $mime, 'base64' => base64_encode((string) file_get_contents($imagePath))]];
+            $job = 'brief.vision';
         }
-        $body = [
-            'model' => $this->cfg['openrouter_model'],
-            'messages' => [
-                ['role' => 'system', 'content' => $system],
-                ['role' => 'user', 'content' => $userContent],
-            ],
-            'temperature' => $this->cfg['temperature'] ?? 0.7,
-        ];
-        $res = HttpClient::postJson($url, $body, ['Authorization' => 'Bearer ' . $key], 120);
-        if ($res['status'] !== 200) {
-            throw new \RuntimeException('OpenRouter HTTP ' . $res['status'] . ': ' . substr($res['body'], 0, 300));
+
+        try {
+            $result = \Bifrost::ai($job, $input, $options);
+        } catch (\BifrostAiError $e) {
+            $this->logger->warn('llm', 'Bifrost AI job failed', ['job' => $job, 'error' => $e->getMessage()]);
+            throw new BriefRefinementFailed('Both LLM backends failed: ' . $e->getMessage(), 0, $e);
         }
-        $data = json_decode($res['body'], true);
-        $text = trim((string) ($data['choices'][0]['message']['content'] ?? ''));
+
+        $text = trim((string) $result['text']);
         if ($text === '') {
-            throw new \RuntimeException('OpenRouter returned an empty response');
+            throw new BriefRefinementFailed('Bifrost returned an empty response for job "' . $job . '"');
         }
-        return ['text' => $text, 'model' => 'openrouter:' . $this->cfg['openrouter_model'], 'backend' => 'openrouter'];
+        return [
+            'text' => $text,
+            'model' => $result['route'] . ':' . $result['model'],
+            'backend' => (string) $result['route'],
+        ];
     }
 }

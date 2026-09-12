@@ -3,24 +3,77 @@ declare(strict_types=1);
 
 namespace Sigil\Render;
 
-use Sigil\Util\Env;
 use Sigil\Util\Logger;
 
 /**
- * Reads config/providers.php and answers "what can this box actually run
- * right now?". A provider is *available* when it needs no key, or when its
- * key is present in .env — the UI greys out the rest instead of offering a
- * choice that is guaranteed to fail.
+ * The image-model roster, sourced from Bifrost::aiRoutes('image') — Bifrost
+ * is the only thing that knows which providers exist, what they cost, and
+ * whether a key is sealed for them (root CLAUDE.md). What stays local is
+ * purely presentational: which output FORMAT a given Bifrost route always
+ * produces is a Sigil-side fact (the route itself doesn't report one), which
+ * is also why Recraft is two routes here (recraft-svg, recraft-png) rather
+ * than one route with a format-dependent model swap.
  */
 final class ProviderRegistry
 {
-    public function __construct(private array $providers, private Logger $logger)
+    private const FORMATS = [
+        'pollinations'       => 'png',
+        'sigil-gemini-image' => 'png',
+        'recraft-svg'        => 'svg',
+        'recraft-png'        => 'png',
+        'sigil-ideogram'     => 'png',
+    ];
+
+    /**
+     * @var array<string,array{route:string,label:string,model:?string,formats:array,
+     *   default_format:string,cost_estimate:float,available:bool}>|null
+     */
+    private ?array $providers = null;
+
+    public function __construct(private Logger $logger)
     {
+    }
+
+    /**
+     * get()'s and catalog()'s shared per-provider shape: route/model for make(), plus every
+     * field Engine.php reads directly off get() (default_format, formats, cost_estimate).
+     *
+     * @return array<string,array{route:string,label:string,model:?string,formats:array,
+     *   default_format:string,cost_estimate:float,available:bool}>
+     */
+    private function load(): array
+    {
+        if ($this->providers !== null) {
+            return $this->providers;
+        }
+        require_once dirname(__DIR__, 3) . '/bifrost/shared/php/BifrostClient.php';
+
+        $out = [];
+        foreach (\Bifrost::aiRoutes('image') as $route) {
+            $slug = (string) $route['slug'];
+            $default = null;
+            foreach ((array) $route['models'] as $m) {
+                if ($default === null || ($m['is_default'] ?? false)) {
+                    $default = $m;
+                }
+            }
+            $format = self::FORMATS[$slug] ?? 'png';
+            $out[$slug] = [
+                'route'           => $slug,
+                'label'           => (string) $route['name'],
+                'model'           => $default !== null ? (string) $default['model'] : null,
+                'formats'         => [$format],
+                'default_format'  => $format,
+                'cost_estimate'   => $default !== null && $default['price_per_call'] !== null ? (float) $default['price_per_call'] : 0.0,
+                'available'       => (bool) ($route['available'] ?? false),
+            ];
+        }
+        return $this->providers = $out;
     }
 
     public function has(string $name): bool
     {
-        return isset($this->providers[$name]);
+        return isset($this->load()[$name]);
     }
 
     public function get(string $name): array
@@ -28,52 +81,17 @@ final class ProviderRegistry
         if (!$this->has($name)) {
             throw new \RuntimeException('Unknown model: ' . $name);
         }
-        return $this->providers[$name];
+        return $this->load()[$name];
     }
-
-
-/** env var -> central Bifrost credential slot (Phase 5). */
-const CENTRAL_SLOTS = [
-    'OPENROUTER_API_KEY' => 'openrouter',
-    'GEMINI_API_KEY'     => 'gemini',
-    'GOOGLE_API_KEY'     => 'gemini',
-    'RECRAFT_API_KEY'    => 'recraft',
-    'IDEOGRAM_API_KEY'   => 'ideogram',
-];
-
-/**
- * A provider key: Bifrost first, the local env var as the migration fallback.
- * Memoized per request by the client, so repeat calls cost nothing.
- */
-public static function centralKey(string $keyEnv): string
-{
-    if ($keyEnv === '') {
-        return '';
-    }
-    $local = (string) Env::get($keyEnv, '');
-    $slot = self::CENTRAL_SLOTS[$keyEnv] ?? null;
-    if ($slot === null || !class_exists('Bifrost', false)) {
-        return $local;
-    }
-    try {
-        return \Bifrost::secret($slot, $keyEnv);
-    } catch (\Throwable) {
-        return $local;
-    }
-}
 
     public function isAvailable(string $name): bool
     {
-        if (!$this->has($name)) {
-            return false;
-        }
-        $keyEnv = (string) ($this->providers[$name]['key_env'] ?? '');
-        return $keyEnv === '' || self::centralKey($keyEnv) !== '';
+        return $this->has($name) && $this->load()[$name]['available'];
     }
 
     public function names(): array
     {
-        return array_keys($this->providers);
+        return array_keys($this->load());
     }
 
     /**
@@ -86,22 +104,25 @@ public static function centralKey(string $keyEnv): string
     public function catalog(): array
     {
         $out = [];
-        foreach ($this->providers as $name => $cfg) {
-            $keyEnv = (string) ($cfg['key_env'] ?? '');
+        foreach ($this->load() as $name => $cfg) {
+            $cost = $cfg['cost_estimate'];
             $out[] = [
-                'name' => $name,
-                'label' => (string) ($cfg['label'] ?? $name),
-                'tier' => (string) ($cfg['tier'] ?? 'premium'),
-                'blurb' => (string) ($cfg['blurb'] ?? ''),
-                'formats' => (array) ($cfg['formats'] ?? ['png']),
-                'default_format' => (string) ($cfg['default_format'] ?? 'png'),
-                'cost_estimate' => (float) ($cfg['cost_estimate'] ?? 0.0),
-                'available' => $this->isAvailable($name),
-                'requires_key' => $keyEnv === '' ? null : $keyEnv,
+                'name'            => $name,
+                'label'           => $cfg['label'],
+                'tier'            => $cost <= 0.0 ? 'free' : 'premium',
+                'blurb'           => '',
+                'formats'         => $cfg['formats'],
+                'default_format'  => $cfg['default_format'],
+                'cost_estimate'   => $cost,
+                'available'       => $cfg['available'],
+                // No longer an env var name — the key, if any, lives in Bifrost, not in this
+                // app's own config. A non-null value only ever meant "this needs one somewhere";
+                // it still does, so premium models keep a (generic) truthy marker here.
+                'requires_key'    => $cost > 0.0 ? 'bifrost' : null,
             ];
         }
         usort($out, static function (array $a, array $b): int {
-            $rank = static fn(array $x): int => ($x['tier'] === 'free' ? 0 : 1);
+            $rank = static fn (array $x): int => ($x['tier'] === 'free' ? 0 : 1);
             return [$rank($a), $a['cost_estimate']] <=> [$rank($b), $b['cost_estimate']];
         });
         return $out;
@@ -121,14 +142,6 @@ public static function centralKey(string $keyEnv): string
     public function make(string $name): RenderProviderInterface
     {
         $cfg = $this->get($name);
-        $class = (string) ($cfg['class'] ?? '');
-        if ($class === '' || !class_exists($class)) {
-            throw new \RuntimeException('Model ' . $name . ' has no provider class');
-        }
-        $obj = new $class($cfg, $this->logger);
-        if (!$obj instanceof RenderProviderInterface) {
-            throw new \RuntimeException($class . ' does not implement RenderProviderInterface');
-        }
-        return $obj;
+        return new BifrostRenderProvider($cfg['route'], $cfg['model'], $this->logger);
     }
 }

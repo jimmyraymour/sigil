@@ -21,20 +21,16 @@ return [
         'charset' => 'utf8mb4',
     ],
 
+    // AI routes cutover (2026-09-11): the provider URLs, models, keys and fallback order
+    // (Local Ollama 01 -> the shared OpenRouter key; the vision-capable model for iterate()
+    // is its own Bifrost job, brief.vision) all moved into Bifrost — see
+    // docs/superpowers/specs/2026-09-10-bifrost-ai-routes-design.md and root CLAUDE.md.
+    // Only sigil's own call-time tuning stays here.
     'llm' => [
-        'ollama_url' => Env::get('OLLAMA_URL', 'http://127.0.0.1:11434'),
-        // Text authoring wants a text model. The old build used a 3B *vision*
-        // model here and it wrote stock-photo prose instead of logo concepts.
-        // llama3.1:8b writes better but needs ~5GB and will not load on a 7GB
-        // box alongside MySQL — qwen2.5:3b is the largest that fits.
-        'ollama_model' => Env::get('OLLAMA_MODEL', 'qwen2.5:3b'),
-        // Vision is only used to look at a previous render during iteration.
-        'ollama_vision_model' => Env::get('OLLAMA_VISION_MODEL', 'qwen2.5vl:3b'),
-        'ollama_timeout' => Env::int('OLLAMA_TIMEOUT', 120),
-        'openrouter_api_key' => Env::get('OPENROUTER_API_KEY', ''),
-        'openrouter_model' => Env::get('OPENROUTER_MODEL', 'meta-llama/llama-3.1-8b-instruct:free'),
         'temperature' => (float) Env::get('LLM_TEMPERATURE', '0.7'),
-        'ollama_vision' => Env::bool('OLLAMA_VISION', true),
+        // Iteration can pass the previous render to the vision job (brief.vision in Bifrost);
+        // that can be slow on a CPU-only box, so this stays a local, non-provider toggle.
+        'vision_iteration_enabled' => Env::bool('VISION_ITERATION_ENABLED', true),
     ],
 
     'http' => [

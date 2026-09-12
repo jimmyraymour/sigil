@@ -14,8 +14,6 @@ use Sigil\Storage\ApiKeyRepository;
 use Sigil\Storage\BriefRepository;
 use Sigil\Storage\RenderRepository;
 use Sigil\Util\ApiException;
-use Sigil\Util\Env;
-use Sigil\Util\HttpClient;
 use Sigil\Util\Uuid;
 
 /**
@@ -50,7 +48,7 @@ final class Engine
         $cfg = $app->config();
         $this->refiner = new BriefRefiner($app->llm(), $app->prompts(), $cfg['max_brief_chars']);
         $this->promptBuilder = new LogoPromptBuilder($cfg['style_choices']);
-        $this->registry = new ProviderRegistry($app->providers(), $app->logger());
+        $this->registry = new ProviderRegistry($app->logger());
         $this->renderService = new RenderService(
             new AssetStore(SIGIL_STORAGE . '/renders'),
             $app->logger(),
@@ -241,8 +239,7 @@ final class Engine
             throw ApiException::badRequest('unknown model: ' . $provider . ' (expected one of: ' . implode(', ', $this->registry->names()) . ')');
         }
         if (!$this->registry->isAvailable($provider)) {
-            $keyEnv = (string) ($this->registry->get($provider)['key_env'] ?? '');
-            throw ApiException::badRequest('model ' . $provider . ' is not configured — set ' . $keyEnv . ' in .env');
+            throw ApiException::badRequest('model ' . $provider . ' is not configured — add its API key in Bifrost → AI & Keys');
         }
 
         $providerCfg = $this->registry->get($provider);
@@ -514,8 +511,8 @@ final class Engine
         if (!in_array($render['output_format'] ?? '', ['png', 'jpg', 'jpeg'], true)) {
             return null;
         }
-        // Vision can be slow on CPU-only boxes; disable with OLLAMA_VISION=false.
-        if (($this->app->config()['llm']['ollama_vision'] ?? true) !== true) {
+        // Vision can be slow on CPU-only boxes; disable with VISION_ITERATION_ENABLED=false.
+        if (($this->app->config()['llm']['vision_iteration_enabled'] ?? true) !== true) {
             return null;
         }
         $abs = (new AssetStore(SIGIL_STORAGE . '/renders'))->open($render['output_path']);
@@ -534,24 +531,21 @@ final class Engine
             $this->app->logger()->error('health', 'DB check failed', ['error' => $e->getMessage()]);
         }
 
-        $ollama = 'down';
-        try {
-            $status = HttpClient::getStatus(rtrim((string) $this->app->config()['llm']['ollama_url'], '/') . '/api/tags', [], 5);
-            $ollama = $status === 200 ? 'ok' : 'down';
-        } catch (\Throwable $e) {
-            // leave 'down'
-        }
-
+        // Sigil no longer talks to Ollama or OpenRouter directly (root CLAUDE.md) — it cannot
+        // ping either one itself any more than it can see their keys. Whether Bifrost is
+        // reachable and this project's routes are granted is what "models" below actually
+        // measures (an empty catalog means one of those two is wrong), so that doubles as the
+        // health signal instead of a separate direct check.
         $models = [];
         foreach ($this->registry->catalog() as $p) {
             $models[$p['name']] = $p['available'] ? 'ok' : 'missing_key';
         }
+        $bifrost = $models !== [] ? 'ok' : 'down';
 
         return [
-            'status' => ($db === 'ok' && $ollama === 'ok') ? 'ok' : 'degraded',
+            'status' => ($db === 'ok' && $bifrost === 'ok') ? 'ok' : 'degraded',
             'db' => $db,
-            'ollama' => $ollama,
-            'openrouter' => Env::get('OPENROUTER_API_KEY', '') === '' ? 'missing_key' : 'ok',
+            'bifrost' => $bifrost,
             'models' => $models,
             'default_model' => $this->registry->defaultProvider(),
             'time' => date('c'),

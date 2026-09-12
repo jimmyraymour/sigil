@@ -38,7 +38,7 @@ echo "Sigil smoke test\n";
 echo "health\n";
 $health = $engine->health();
 check('db ok', ($health['db'] ?? '') === 'ok', json_encode($health));
-check('ollama ok', ($health['ollama'] ?? '') === 'ok', 'Ollama must be running locally');
+check('bifrost ok', ($health['bifrost'] ?? '') === 'ok', 'Bifrost must be reachable and this project must have granted routes');
 check('a free model is available', ($health['models']['pollinations'] ?? '') === 'ok');
 check('default model needs no key', $engine->registry()->isAvailable($health['default_model']));
 
@@ -66,7 +66,7 @@ $brief = $engine->refineBrief([
 $briefId = $brief['id'];
 check('concept has id', isset($brief['id']) && strlen($brief['id']) === 36);
 check('concept text is 40-800 chars', mb_strlen($brief['refined_brief']) >= 40 && mb_strlen($brief['refined_brief']) <= 800);
-check('concept ran on the local model', str_starts_with((string) $brief['model_used'], 'ollama:'));
+check('concept ran on the local model', str_starts_with((string) $brief['model_used'], 'local-ollama-01:'));
 check('second field was stored', $brief['logo_description'] !== null);
 check('entity type was stored', $brief['entity_type'] === 'organization');
 check('no label blocks leaked through', !preg_match('/^(subject|style|palette|mood)\s*:/im', $brief['refined_brief']));
@@ -159,10 +159,10 @@ try {
     check('empty description is rejected', true);
 }
 try {
-    $engine->render(['brief_id' => $briefId, 'provider' => 'recraft']);
+    $engine->render(['brief_id' => $briefId, 'provider' => 'recraft-svg']);
     check('unconfigured model is refused before spending', false);
 } catch (Sigil\Util\ApiException $e) {
-    check('unconfigured model is refused before spending', str_contains($e->getMessage(), 'RECRAFT_API_KEY'));
+    check('unconfigured model is refused before spending', str_contains($e->getMessage(), 'Bifrost'));
 }
 try {
     $engine->render(['brief_id' => $briefId, 'provider' => 'pollinations', 'output_format' => 'svg']);

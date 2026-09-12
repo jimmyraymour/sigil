@@ -10,7 +10,6 @@ namespace Sigil;
 final class App
 {
     private array $config;
-    private array $providers;
     private array $prompts;
 
     private ?Util\Logger $logger = null;
@@ -20,21 +19,15 @@ final class App
     private ?Api\Auth $auth = null;
     private ?Engine $engine = null;
 
-    public function __construct(array $config, array $providers, array $prompts)
+    public function __construct(array $config, array $prompts)
     {
         $this->config = $config;
-        $this->providers = $providers;
         $this->prompts = $prompts;
     }
 
     public function config(): array
     {
         return $this->config;
-    }
-
-    public function providers(): array
-    {
-        return $this->providers;
     }
 
     public function prompts(): array

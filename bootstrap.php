@@ -35,8 +35,7 @@ unset($raymourTheme);
 date_default_timezone_set(Env::get('APP_TIMEZONE', 'America/Santo_Domingo'));
 
 $config = require SIGIL_CONFIG . '/app.php';
-$providers = require SIGIL_CONFIG . '/providers.php';
 $prompts = require SIGIL_CONFIG . '/prompts.php';
 
 // Returns a fully wired application container.
-return new Sigil\App($config, $providers, $prompts);
+return new Sigil\App($config, $prompts);
