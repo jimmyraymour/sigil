@@ -28,7 +28,7 @@ if (!$authorized && $key !== '' && $auth->isValidKey($key)) {
 if (!$authorized && $sig !== '' && $exp !== '' && ctype_digit($exp) && $app->urlSigner()->verify('render:' . $id, $sig, (int) $exp)) {
     $authorized = true;
 }
-// Bifrost SSO (Phase 1): an authorized UI session (cookie on .raymour.local)
+// Bifrost SSO (Phase 1): an authorized UI session (cookie on .raymour.lat)
 // may also load renders — same identity the UI pages require. No redirect
 // here: <img> requests get the plain 401 below instead of an HTML login page.
 if (!$authorized) {

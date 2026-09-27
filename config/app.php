@@ -8,7 +8,7 @@ return [
         'env' => Env::get('APP_ENV', 'development'),
         'debug' => Env::bool('APP_DEBUG', true),
         'base_url' => Env::get('APP_BASE_URL', 'http://127.0.0.1:8001'),
-        'timezone' => Env::get('APP_TIMEZONE', 'America/Santo_Domingo'),
+        'timezone' => Env::get('APP_TIMEZONE', 'America/New_York'),
         'web_api_key' => Env::get('WEB_API_KEY', ''),
     ],
 
@@ -31,6 +31,12 @@ return [
         // Iteration can pass the previous render to the vision job (brief.vision in Bifrost);
         // that can be slow on a CPU-only box, so this stays a local, non-provider toggle.
         'vision_iteration_enabled' => Env::bool('VISION_ITERATION_ENABLED', true),
+        // Longest side, in pixels, of the copy sent to the vision model (Engine::downscaleForVision).
+        // A 768x768 render is ~155 KB of base64 prompt payload, and a CPU-only 4B vision model
+        // cannot tokenise that inside Bifrost's brief.vision timeout, so iterate() times out on a
+        // path that looks like "vision is broken". Shapes and proportions survive a downscale, so
+        // 512 is ample for judging a logo. 0 disables downscaling and restores the old behaviour.
+        'vision_max_side' => (int) Env::get('VISION_MAX_SIDE', '512'),
     ],
 
     'http' => [

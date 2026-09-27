@@ -36,7 +36,7 @@ never produced working output is worse than one honestly marked `partial`.
 | What | Value |
 |---|---|
 | Project id | `sigil` (your key can touch nothing else) |
-| API base | `http://localhost/meridian/api` — **http, not https** |
+| API base | `https://meridian.raymour.lat/api` — **https, via the vhost**. The old `http://localhost/meridian/api` is dead (404) and silently broke reporting for a month; never reintroduce it. |
 | Auth header | `X-MC-Key: $MERIDIAN_API_KEY` on **every** request, no exceptions |
 | Content type | `application/json` on every request with a body |
 
@@ -157,21 +157,26 @@ curl -s -X POST "$MERIDIAN_API_URL/costs" -H "X-MC-Key: $MERIDIAN_API_KEY" \
 `subscription` · `other`. Cost rows have no delete — **do not write test rows.** To prove the
 endpoint works, send a deliberately invalid `category` and confirm the `422`.
 
-## 1.7 Endpoint map (verified working 2026-08-19)
+## 1.7 Endpoint map (re-verified live 2026-09-27 against `https://meridian.raymour.lat/api`)
 
-| Method | Endpoint | Purpose |
-|---|---|---|
-| `GET` | `/projects` | Confirm identity / key health |
-| `GET` | `/dashboard` | Last report, flags, open alerts |
-| `GET` | `/items?project_id=sigil` | Read the tree (`&status=`, `&tracker_id=`, `&section_tag=`) |
-| `POST` | `/items` | Create (no `item_id`) or update (with `item_id`) |
-| `DELETE` | `/items?project_id=sigil&item_id=<id>` | Delete a childless item |
-| `POST` | `/reports` | Work-session report |
-| `POST` | `/alerts` | Raise an alert |
-| `POST` | `/alerts/ack` | Acknowledge one you resolved |
-| `POST` | `/costs` | Standalone spend |
-| `GET` | `/reminders?due_within_days=30` | Expense reminders |
-| `GET` | `/guide` | Re-download the full guide |
+| Method | Endpoint | Purpose | Verified |
+|---|---|---|---|
+| `GET` | `/projects` | Confirm identity / key health | 200 (1 project) |
+| `GET` | `/items?project_id=sigil&tracker_id=42` | Read the tree (`&status=`, `&section_tag=`) | 200 (109 items) |
+| `POST` | `/items` | Create (no `item_id`) or update (with `item_id`) | 200 |
+| `DELETE` | `/items?project_id=sigil&item_id=<id>` | Delete a childless item | — |
+| `GET` | `/dashboard?project_id=sigil` | Last report, flags, open alerts | 200 |
+| `POST` | `/reports` | Work-session report | 201 |
+| `POST` | `/alerts` | Raise an alert | — |
+| `POST` | `/alerts/ack` | Acknowledge one you resolved | — |
+| `POST` | `/costs` | Standalone spend | — |
+| `GET` | `/reminders` | Expense reminders | 200 |
+| `GET` | `/guide` | Re-download the full guide | 200 |
+
+All six read/write paths were exercised on 2026-09-27 with the real key from `sigil/.env`; the base
+URL in `.env`, `.env.example` and §1.1 is `https://meridian.raymour.lat/api`. The previous revision
+of this table was verified against `http://localhost/meridian/api`, which has since 404'd — if a row
+says "verified" against a base URL that is not the one above, re-verify it before trusting it.
 
 `POST /projects` is master-key-only and answers `403 Forbidden: master key required`. **That is
 expected, not a misconfiguration.** Sigil is already registered; never try to register it.
@@ -247,11 +252,25 @@ Consequences, which are now project rules:
 
 ## 2.3 Environment facts that will cost you time
 
-- **RAM:** 7GB total, ~4GB free. `llama3.1:8b` (4.9GB) **will not load** — Ollama returns an empty
-  response and the call times out. `qwen2.5:3b` is the largest text model that fits. Use the
-  vision model (`qwen2.5vl:3b`) only for looking at a previous render.
-- **Served by XAMPP at `http://localhost/sigil/`**, not at a domain root. `BasePath` detects the
-  mount per request, so never hardcode a URL starting from `/`.
+Re-measured on this host 2026-09-27 (Linux, not XAMPP/Windows). Items marked ⚠ were wrong before.
+
+- ⚠ **RAM: 12GB total, but often only ~300-500MB free** with swap in use — the box runs several
+  agent sessions and a 5GB `llama-server` alongside. A model that fits on paper can still be
+  evicted the instant a request arrives: Ollama then returns HTTP 200 with an **empty content and
+  `done_reason: "load"` in 0.0s**, which looks exactly like a broken model. Check `free -m` and
+  `/api/ps` before concluding a model is wrong.
+- ⚠ **The vision model is `qwen3-vl:4b`** (3.3GB), not `qwen2.5vl:3b` — the latter is not
+  installed, and Bifrost job `brief.vision` was pinned to it until 2026-09-27, so vision iteration
+  could not run at all. Confirmed working: it answers a vision prompt correctly when it can stay
+  resident.
+- **Vision still times out on this host** at Bifrost's `brief.vision` 120s job timeout, because the
+  model is evicted mid-request. The payload was reduced ~6.4x (768²/155KB -> 512²/25KB, see
+  `llm.vision_max_side` and `Engine::downscaleForVision`) and that is necessary but not sufficient
+  while memory is this tight. It is a capacity problem, not a code problem.
+- `qwen2.5:3b` is the largest *text* model that comfortably fits. `llama3.1:8b` (4.9GB) does not.
+- ⚠ **Served by its own vhost at `https://sigil.raymour.lat`**, behind Bifrost SSO (an
+  unauthenticated GET / returns 302 to the Bifrost login). It is no longer mounted at
+  `http://localhost/sigil/`; that path 404s. `BasePath` still detects the mount per request.
 - **The project-root `.htaccess` is load-bearing.** It routes into `public/` and blocks everything
   above it. Without it Apache serves a directory listing of the whole repo including `.env`. Do
   not delete it.
@@ -262,6 +281,9 @@ Consequences, which are now project rules:
   remove it and every authenticated API call 401s.
 - **PHP `max_execution_time` is 120s** under Apache. Rendering a whole batch in one request
   overruns it — the browser renders one variant per request for this reason.
+- **`imagepng($im, $path, 85)` fails under memory pressure** with "gd-png: fatal libpng error: bad
+  parameters to zlib", silently writing a corrupt ~54-byte file. Use `imagejpeg()` (works, and is
+  smaller) or `imagepng($im, $path, 6)`. This cost a real debugging cycle in the vision work.
 - **The free image endpoint rate-limits bursts.** The smoke test calls it live and is therefore
   not perfectly deterministic; an occasional single-variant failure is the endpoint, not the code.
 
@@ -269,8 +291,12 @@ Consequences, which are now project rules:
 
 ```sh
 php tests/smoke.php     # generates real images and asserts they are not placeholders
-php bin/sigil health    # DB, Ollama, and which models are actually configured
+php bin/sigil health    # DB, Bifrost reachability, and which models are actually configured
 ```
 
-Then open `http://localhost/sigil/` and look at the output. The suite cannot tell you whether a
+`smoke.php` reports a failed check rather than dying when a provider is down (since 2026-09-27),
+so a partial run still prints a summary and a non-zero exit. Read the whole output: a `FAIL … could
+not run` line means the section was skipped by an outage, not that it passed.
+
+Then open `https://sigil.raymour.lat` and look at the output. The suite cannot tell you whether a
 logo is any good; only you can.

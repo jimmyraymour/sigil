@@ -35,10 +35,14 @@ final class Layout
             $banner = '<div class="banner banner-warn">Web UI needs an API key: run <code>php bin/sigil key:create web</code>, then set <code>WEB_API_KEY</code> in <code>.env</code>.</div>';
         }
 
-        $head = function_exists('raymour_theme') ? raymour_theme('light') : null;
-        $themeHead = $head !== null ? $head['head']() : '';
-        $modeJs    = $head !== null ? $head['mode_js']() : '';
-        $themeJs   = $head !== null ? $head['scripts']() : '';
+        // Shared chrome, unconditionally. bootstrap.php already guarantees
+        // shared/inc/theme.php was loaded or the app refused to boot, so there is nothing to
+        // test for here — a function_exists() guard would be exactly the silent-fallback shape
+        // root CLAUDE.md rule 6 forbids, and it would hide a broken install as a blank page.
+        $head = raymour_theme('light');
+        $themeHead = $head['head']();
+        $modeJs    = $head['mode_js']();
+        $themeJs   = $head['scripts']();
 
         $home = BasePath::url('/');
         $navItem = static function (string $href, string $icon, string $label, string $act): string {
@@ -117,7 +121,7 @@ HTML;
     </div>
   </div>
 </div>
-<script src="https://bifrost.raymour.local/shared/bar.js" data-current="sigil" defer></script>
+<script src="https://bifrost.raymour.lat/shared/bar.js" data-current="sigil" defer></script>
 ' . $themeJs . '</body>
 </html>';
     }

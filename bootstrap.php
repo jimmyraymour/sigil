@@ -25,14 +25,20 @@ spl_autoload_register(static function (string $class): void {
 Env::load(SIGIL_ROOT . '/.env');
 
 // Shared portfolio theme (Metronic look) — lives once at the workspace root.
-// Optional on purpose: pages fall back to the app's own CSS if it is missing.
+// Required, not optional: root CLAUDE.md rule 6 forbids `function_exists('raymour_theme')`
+// fallbacks and any THEME_BASE_URL bridge, because chrome must exist in exactly one place.
+// A missing shared/inc/theme.php is a broken install and must fail loudly at boot rather than
+// silently rendering pages with no shared chrome.
 $raymourTheme = dirname(SIGIL_ROOT) . '/shared/inc/theme.php';
-if (is_file($raymourTheme)) {
-    require_once $raymourTheme;
+if (!is_file($raymourTheme)) {
+    http_response_code(500);
+    exit('Sigil: shared theme not found at ' . $raymourTheme
+        . ' — the workspace shared/ directory is required (root CLAUDE.md rule 6).');
 }
+require_once $raymourTheme;
 unset($raymourTheme);
 
-date_default_timezone_set(Env::get('APP_TIMEZONE', 'America/Santo_Domingo'));
+date_default_timezone_set(Env::get('APP_TIMEZONE', 'America/New_York'));
 
 $config = require SIGIL_CONFIG . '/app.php';
 $prompts = require SIGIL_CONFIG . '/prompts.php';

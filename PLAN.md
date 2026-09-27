@@ -2,8 +2,8 @@
 
 > Mirrored in the Meridian tracker (`project_id: sigil`, tracker `dev`, id 42). Phase numbers
 > here match tracker item numbering. Progress is Meridian's weighted figure: `done` = 1,
-> `partial` = 0.5, `deferred`/`external` excluded. **81%** as of 2026-08-19; the live tracker
-> is authoritative if this mirror lags.
+> `partial` = 0.5, `deferred`/`external` excluded. **80%** as of 2026-09-27 (71 of 89 weighted
+> leaf items, leaf-only math); the live tracker is authoritative if this mirror lags.
 
 Sigil is a **logo generator**. You describe what something does, and it gives you logo options
 back. The default model is free; premium models are available when a result is worth paying for.

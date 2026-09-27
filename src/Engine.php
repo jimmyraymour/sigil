@@ -516,7 +516,74 @@ final class Engine
             return null;
         }
         $abs = (new AssetStore(SIGIL_STORAGE . '/renders'))->open($render['output_path']);
-        return is_file($abs) ? $abs : null;
+        if (!is_file($abs)) {
+            return null;
+        }
+        return $this->downscaleForVision($abs);
+    }
+
+    /**
+     * Write a downscaled copy of a render for the vision model and return its path.
+     *
+     * A render is 768x768 (or larger), and base64 of that is ~150-200 KB of prompt payload.
+     * On a CPU-only Ollama box a 4B vision model spends longer tokenising a full-size image than
+     * Bifrost's brief.vision job allows (120s), so iterate() failed with a timeout on a path
+     * that looks like "vision is broken". A logo's shapes and proportions are fully legible at a
+     * much smaller size — what the model is being asked for ("is this too busy, is the mark
+     * legible") does not depend on pixel density.
+     *
+     * Returns the ORIGINAL path unchanged when downscale is disabled or unavailable, so this can
+     * only ever make a slow call cheaper, never change which render is reviewed.
+     */
+    private function downscaleForVision(string $abs): string
+    {
+        $maxSide = (int) ($this->app->config()['llm']['vision_max_side'] ?? 0);
+        if ($maxSide <= 0 || !function_exists('imagecreatetruecolor')) {
+            return $abs; // GD absent or disabled: keep current behaviour
+        }
+        $size = @getimagesize($abs);
+        if ($size === false) {
+            return $abs;
+        }
+        [$w, $h] = $size;
+        if ($w <= $maxSide && $h <= $maxSide) {
+            return $abs; // already small enough
+        }
+        $src = match (strtolower((string) ($size['mime'] ?? ''))) {
+            'image/jpeg' => @imagecreatefromjpeg($abs),
+            'image/png'  => @imagecreatefrompng($abs),
+            default      => false,
+        };
+        if ($src === false) {
+            return $abs;
+        }
+        $scale = min($maxSide / $w, $maxSide / $h);
+        $nw    = max(1, (int) round($w * $scale));
+        $nh    = max(1, (int) round($h * $scale));
+        $dst   = imagecreatetruecolor($nw, $nh);
+        // Flat white behind the copy: several renders have alpha, and a vision model reading a
+        // transparent PNG otherwise sees the logo composited onto whatever the decoder guesses.
+        imagefill($dst, 0, 0, imagecolorallocate($dst, 255, 255, 255));
+        imagecopyresampled($dst, $src, 0, 0, 0, 0, $nw, $nh, $w, $h);
+        imagedestroy($src);
+
+        // JPEG, not PNG. Two reasons: it is a third of the bytes (shrinking the prompt payload is
+        // the whole point), and imagepng()'s quality-argument form fails on this box with "gd-png:
+        // fatal libpng error: bad parameters to zlib" under memory pressure, writing a corrupt
+        // 54-byte file. JPEG works, and the background is already flattened to white above, so
+        // there is no alpha to lose. PNG remains a fallback for anything JPEG cannot encode.
+        $stem = SIGIL_STORAGE . '/renders/.vision-' . substr(sha1($abs . '|' . filemtime($abs)), 0, 16);
+        $wrote = imagejpeg($dst, $stem . '.jpg', 85) || imagepng($dst, $stem . '.png', 6);
+        imagedestroy($dst);
+        if (!$wrote) {
+            return $abs; // encoder failed: use the original rather than send a broken file
+        }
+        foreach (glob($stem . '.{jpg,png}', GLOB_BRACE) ?: [] as $candidate) {
+            if (is_file($candidate)) {
+                return $candidate;
+            }
+        }
+        return $abs;
     }
 
     // ---------------------------------------------------------- health

@@ -304,7 +304,12 @@ final class Command
     private function cmdHealth(array $opts): int
     {
         $h = $this->app->engine()->health();
-        $human = "status: {$h['status']}\ndb: {$h['db']}\nollama: {$h['ollama']}\nopenrouter: {$h['openrouter']}\ndefault model: {$h['default_model']}";
+        // Read bifrost, not the old ollama/openrouter keys. Engine::health() stopped reporting
+        // those two when the AI-routes cutover landed — Sigil can no longer ping either provider
+        // itself — and this line was left behind, so every `sigil health` printed two PHP
+        // "Undefined array key" warnings above a blank value. A health command that emits
+        // warnings and misreports its own dependencies is worse than no health command.
+        $human = "status: {$h['status']}\ndb: {$h['db']}\nbifrost: {$h['bifrost']}\ndefault model: {$h['default_model']}";
         foreach ($h['models'] as $name => $state) {
             $human .= "\n  {$name}: {$state}";
         }

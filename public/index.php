@@ -9,7 +9,7 @@ use Sigil\Util\BasePath;
 $app = require __DIR__ . '/../bootstrap.php';
 
 // Bifrost SSO (Phase 1): every UI page requires a signed-in identity. The
-// browser carries the bifrost_session cookie (.raymour.local) and the shared
+// browser carries the bifrost_session cookie (.raymour.lat) and the shared
 // client introspects it server-side. The REST API keeps its Bearer-key auth;
 // render.php accepts either.
 require dirname(__DIR__) . '/../bifrost/shared/php/BifrostClient.php';
